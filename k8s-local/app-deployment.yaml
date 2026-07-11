@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anime-rec-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anime-rec-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anime-rec-app
+    spec:
+      containers:
+        - name: app
+          image: anime-rec-app
+          #imagePullPolicy: Never
+          ports:
+            - containerPort: 8501
+          env:
+            - name: LLM_PROVIDER
+              value: "vllm"
+            - name: VLLM_BASE_URL
+              value: "http://vllm-server.anime-rec.svc.cluster.local:8000/v1"
+            - name: VLLM_MODEL_NAME
+              value: "HuggingFaceTB/SmolLM2-135M-Instruct"
+          resources:
+            requests: {cpu: "250m", memory: "512Mi"}
+            limits: {cpu: "1", memory: "1Gi"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anime-rec-service
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: anime-rec-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8501
