@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars for local runs (CI passes project_id via TF_VAR_project_id).
+project_id = "my-gcp-project-id"
+
+# Optional overrides (defaults shown):
+# region              = "us-central1"
+# zone                = "us-central1-a"
+# cluster_name        = "anime-rec-cluster"
+# artifact_repo_name  = "anime-rec"
+# model_bucket_name   = ""            # defaults to <project_id>-anime-models
+# app_machine_type    = "e2-medium"       # always-on app pool
+# serve_machine_type  = "e2-standard-8"    # vLLM CPU serving pool (scales 0->1)
+# k8s_namespace       = "default"
+# k8s_service_account = "anime-sa"

@@ -1,0 +1,9 @@
+# Terraform
+# NOTE: .terraform.lock.hcl IS committed on purpose (reproducible provider versions).
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!terraform.tfvars.example
+tfplan
+crash.log
