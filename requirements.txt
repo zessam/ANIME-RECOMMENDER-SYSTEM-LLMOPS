@@ -1,6 +1,7 @@
 langchain==0.2.16
 langchain-community==0.2.16
 langchain_groq==0.1.9
+langchain_openai==0.1.23
 chromadb==0.5.5
 streamlit==1.37.1
 pandas==2.2.2

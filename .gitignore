@@ -2,3 +2,4 @@ venv/
 logs/
 ANIME_RECOMMENDER.egg-info/
 .env
+.claude

@@ -20,6 +20,9 @@ COPY . .
 ## Run setup.py
 RUN pip install --no-cache-dir -e .
 
+## Build the Chroma vector store from the bundled CSVs (not checked into git)
+RUN python pipeline/build_pipeline.py
+
 # Used PORTS
 EXPOSE 8501
 

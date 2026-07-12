@@ -15,15 +15,15 @@ spec:
     spec:
       containers:
         - name: app
-          image: anime-rec-app
-          #imagePullPolicy: Never
+          image: docker.io/library/anime-rec-app:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 8501
           env:
             - name: LLM_PROVIDER
               value: "vllm"
             - name: VLLM_BASE_URL
-              value: "http://vllm-server.anime-rec.svc.cluster.local:8000/v1"
+              value: "http://vllm-server.default.svc.cluster.local:8000/v1"
             - name: VLLM_MODEL_NAME
               value: "HuggingFaceTB/SmolLM2-135M-Instruct"
           resources:

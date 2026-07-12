@@ -1,6 +1,5 @@
 from src.vector_store import VectorStoreBuilder
 from src.recommender import AnimeRecommender
-from config.config import GROQ_API_KEY,MODEL_NAME
 from utils.logger import get_logger
 from utils.custom_exception import CustomException
 
@@ -15,7 +14,7 @@ class AnimeRecommendationPipeline:
 
             retriever = vector_builder.load_vector_store().as_retriever()
 
-            self.recommender = AnimeRecommender(retriever,GROQ_API_KEY,MODEL_NAME)
+            self.recommender = AnimeRecommender(retriever)
 
             logger.info("Pipleine intialized sucesfully...")
 
