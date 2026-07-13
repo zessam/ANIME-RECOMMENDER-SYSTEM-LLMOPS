@@ -25,7 +25,11 @@ spec:
       initContainers:
         - name: seed-chroma
           image: us-central1-docker.pkg.dev/PROJECT_ID/anime-rec/anime-rec-app:PLACEHOLDER
-          command: ["sh", "-c", "cp -a /app/chroma_db/. /seed/ && echo chroma seeded"]
+          # cp -r (not -a): the initContainer runs as non-root (10001) and can't
+          # set timestamps on the emptyDir root it doesn't own — `cp -a` fails with
+          # "preserving times for '/seed/.': Operation not permitted". Chroma/SQLite
+          # don't need preserved mtimes, so plain recursive copy is correct + stays hardened.
+          command: ["sh", "-c", "cp -r /app/chroma_db/. /seed/ && echo chroma seeded"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

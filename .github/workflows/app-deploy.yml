@@ -153,9 +153,13 @@ jobs:
   # STAGE 2 — build image locally + scan (Trivy). No push. PR merge gate.
   # ===========================================================================
   build-scan:
-    name: Build image + Trivy scan
+    name: Build + Trivy scan (PR gate)
     runs-on: ubuntu-latest
-    #needs: [lint-test, pip-audit, gitleaks, bandit, hadolint]
+    # PR-only: build the image ONCE locally and scan it before merge.
+    # On push/dispatch the `deploy` job builds+scans the PUSHED image, so the
+    # image is only ever built once per run (no double build).
+    if: github.event_name == 'pull_request'
+    needs: [lint-test, pip-audit, gitleaks, bandit, hadolint, kubeconform, kube-linter]
     permissions:
       contents: read
       security-events: write
@@ -242,14 +246,16 @@ jobs:
   # STAGE 4 — build+push+sign+deploy to GKE. Non-PR only; WAITS FOR APPROVAL.
   # ===========================================================================
   deploy:
-    name: Push image + deploy to GKE
+    name: Build+push, scan, deploy to GKE
     runs-on: ubuntu-latest
-    needs: [build-scan] #, manifest-policy]
+    # Builds+pushes the image ONCE, scans that exact digest, then deploys it.
+    needs: [lint-test, pip-audit, gitleaks, bandit, hadolint, kubeconform, kube-linter]
     if: github.event_name != 'pull_request'
     environment: production # REQUIRED REVIEWERS => waits for approval
     permissions:
       contents: read
       id-token: write # Workload Identity Federation + cosign keyless
+      security-events: write # upload Trivy SARIF
     steps:
       - uses: actions/checkout@v5
 
@@ -286,6 +292,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # --- all image scans run on the ONE pushed image, before deploy ---
+      - name: Trivy scan pushed image (SARIF)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          format: sarif
+          output: trivy.sarif
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
       - name: Trivy gate on the pushed image (fail-closed)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -294,6 +317,20 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          retention-days: 7
 
       - name: Sign image (cosign keyless / OIDC)
         uses: sigstore/cosign-installer@v3
