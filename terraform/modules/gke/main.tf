@@ -115,8 +115,14 @@ resource "google_container_node_pool" "app" {
   location = var.zone
   cluster  = google_container_cluster.primary.name
 
-  # Fixed single node — predictable cost and vCPU usage for the free tier.
-  node_count = 1
+  # Autoscale so the scheduler can add a second node when pods don't fit
+  # (e.g. app + monitoring). Stays at 1 node when everything fits, so cost only
+  # grows on demand. Peak (2 app + 1 serve) = 8 vCPU = default free-tier quota.
+  initial_node_count = 1
+  autoscaling {
+    min_node_count = 1
+    max_node_count = 2
+  }
 
   management {
     auto_repair  = true

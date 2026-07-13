@@ -5,7 +5,7 @@ Provisions everything needed to run the Anime Recommender + vLLM on GKE.
 upgrade or GPU quota. vLLM serves a small model (Qwen2.5-3B) on CPU.
 
 - GKE cluster (zonal, VPC-native, Workload Identity)
-- app-pool (always-on, `e2-medium`, fixed 1 node) + serve-pool (vLLM on CPU, `e2-standard-4`, scales 0→1)
+- app-pool (`e2-standard-2`, autoscale 1→2) + serve-pool (vLLM on CPU, `e2-highmem-4` / 32GB, scales 0→1)
 - Artifact Registry Docker repo (app image)
 - GCS bucket for model weights (optional — vLLM can also pull from HF Hub directly)
 - Workload-identity service account so pods can read the bucket
@@ -216,11 +216,24 @@ Typical next steps (not managed by this Terraform):
    - `nodeSelector: { workload: vllm }`
    - a toleration for `dedicated=vllm:NoSchedule`
    - image `vllm/vllm-openai-cpu`, serving `Qwen/Qwen2.5-3B-Instruct`
+   - `resources.requests.memory: ~14Gi`, and env `VLLM_CPU_KVCACHE_SPACE=4`
    Then deploy the app pointing `VLLM_BASE_URL` at the vLLM service.
 
-## Cost discipline (free tier)
+## Sizing (why these machines)
+
+| Pool | Machine | Allocatable | Hosts |
+|------|---------|-------------|-------|
+| app | `e2-standard-2` (2 vCPU / 8GB), autoscale 1→2 | ~1930m CPU / 6.1GB | Streamlit app + pipeline (+ light monitoring) |
+| serve | `e2-highmem-4` (4 vCPU / 32GB), scale 0→1 | ~3920m CPU / 28.3GB | vLLM serving Qwen2.5-3B (~13-15GB) |
+
+Peak usage (app scaled to 2 + serve up) = **8 vCPU** = the default free-tier
+regional quota. Steady state is 2–6 vCPU. `e2-medium` was too small (only
+~940m allocatable CPU after GKE's flat 1060m reservation on shared-core E2).
+
+## Cost discipline (free tier / $300 credit)
 
 - The serve pool scales to 0 — **scale the vLLM Deployment to 0 replicas when
-  not testing** so the `e2-standard-4` node drains and billing stops.
-- Run **Infra Destroy** (or `terraform destroy`) between work sessions. State is
-  remote, so you can rebuild anytime.
+  not testing** so the `e2-highmem-4` node drains and billing stops.
+- Always-on cost ≈ 1× `e2-standard-2` (~$0.067/hr) + Cloud NAT (~$0.044/hr).
+- Run **Infra Destroy** (or `terraform destroy`) between work sessions — this is
+  the biggest saver; state is remote so you can rebuild anytime.

@@ -34,15 +34,15 @@ variable "model_bucket_name" {
 }
 
 variable "app_machine_type" {
-  description = "Machine type for the always-on app node pool (Streamlit + pipeline)."
+  description = "Machine type for the app node pool (Streamlit + pipeline). e2-standard-2 gives ~1930m allocatable CPU (vs ~940m on shared-core e2-medium), enough for the app plus light monitoring."
   type        = string
-  default     = "e2-medium"
+  default     = "e2-standard-2"
 }
 
 variable "serve_machine_type" {
-  description = "Machine type for the vLLM CPU serving pool. e2-standard-4 (4 vCPU / 16GB) fits a 3B model on CPU and stays within the default 8-vCPU free-tier regional quota alongside the app node."
+  description = "Machine type for the vLLM CPU serving pool. e2-highmem-4 (4 vCPU / 32GB) gives ~28GB allocatable — comfortable for a 3B model on CPU (needs ~13-15GB) with no OOM risk — while using only 4 vCPU of the free-tier quota."
   type        = string
-  default     = "e2-standard-4"
+  default     = "e2-highmem-4"
 }
 
 variable "master_authorized_cidrs" {
