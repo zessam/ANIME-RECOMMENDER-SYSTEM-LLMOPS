@@ -21,8 +21,9 @@ spec:
             - |
               set -e
               pip install --quiet guidellm
-              # --target is the OpenAI base URL of the ROUTER (single entry point)
-              guidellm benchmark \
+              # newer GuideLLM: `benchmark` is a group; the `run` subcommand takes
+              # the options. --target is the OpenAI base URL of the ROUTER.
+              guidellm benchmark run \
                 --target http://vllm-router-service.default.svc.cluster.local:80 \
                 --model Qwen/Qwen2.5-3B-Instruct \
                 --rate-type sweep \

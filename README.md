@@ -2,7 +2,7 @@
 
 > **A security-gated, self-hosted LLM platform on GKE — with an anime RAG recommender as the reference workload.**
 
-OtakuOps is an end-to-end **LLMOps / LLMSecOps / MLOps** reference platform. The user-facing product is a retrieval-augmented anime recommender, but the point of the project is everything *around* the model: infrastructure as code, a self-hosted LLM, a DevSecOps CI/CD pipeline, full observability, and an eight-tool LLM red-team suite — all engineered to run inside a **CPU-only, $300 free-tier budget**.
+OtakuOps is an end-to-end **LLMOps / LLMSecOps** reference platform. The user-facing product is a retrieval-augmented anime recommender, but the point of the project is everything *around* the model: infrastructure as code, a self-hosted LLM, a DevSecOps CI/CD pipeline, full observability, and an eight-tool LLM red-team suite — all engineered to run inside a **CPU-only, $300 free-tier budget**.
 
 <p align="left">
   <img alt="LLM" src="https://img.shields.io/badge/LLM-Qwen2.5--3B%20(self--hosted)-blue">
@@ -194,12 +194,13 @@ flowchart TB
 
 The same DevSecOps shape is reused across pipelines:
 
-| Workflow | Deploys | Key gates |
-|----------|---------|-----------|
-| `infra-build.yml` | GKE + VPC + GCS + Artifact Registry | validate · tfsec · Checkov · gitleaks · **OPA policy** → approval |
-| `vllm-deploy.yml` | vLLM production-stack (CPU) | Helm render · kubeconform → approval |
-| `observability-deploy.yml` | Prometheus/Grafana + Pushgateway | kubeconform · Checkov · gitleaks → approval |
-| `llmsecops.yml` | LLM red-team stages | per-tool, manual dispatch |
+
+| Workflow                   | Deploys                             | Key gates                                                             |
+| -------------------------- | ----------------------------------- | --------------------------------------------------------------------- |
+| `infra-build.yml`          | GKE + VPC + GCS + Artifact Registry | validate · tfsec · Checkov · gitleaks ·**OPA policy** → approval |
+| `vllm-deploy.yml`          | vLLM production-stack (CPU)         | Helm render · kubeconform → approval                                |
+| `observability-deploy.yml` | Prometheus/Grafana + Pushgateway    | kubeconform · Checkov · gitleaks → approval                        |
+| `llmsecops.yml`            | LLM red-team stages                 | per-tool, manual dispatch                                             |
 
 Auth is **keyless** throughout via **Workload Identity Federation** — no service-account JSON keys in secrets. SARIF findings surface in the GitHub Security tab.
 
@@ -255,19 +256,20 @@ See [`k8s/observability/README.md`](k8s/observability/README.md) for PromQL pane
 
 ## Tech stack
 
-| Layer | Technology |
-|-------|-----------|
-| **UI** | Streamlit |
-| **Orchestration** | LangChain (`RetrievalQA`) |
-| **Vector store** | Chroma |
-| **Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` |
-| **LLM (default)** | Qwen2.5-3B-Instruct via vLLM production-stack |
-| **LLM (fallback)** | Groq (`llama-3.1-8b-instant`) |
-| **Cloud** | Google Kubernetes Engine (GKE) |
-| **IaC** | Terraform (modular: network · gke · storage · artifact_registry) |
-| **CI/CD** | GitHub Actions + Workload Identity Federation |
-| **Security** | tfsec · Checkov · gitleaks · OPA/conftest · 8-tool LLMSecOps suite |
-| **Observability** | kube-prometheus-stack · Grafana · Pushgateway · GuideLLM · lm-eval |
+
+| Layer              | Technology                                                             |
+| ------------------ | ---------------------------------------------------------------------- |
+| **UI**             | Streamlit                                                              |
+| **Orchestration**  | LangChain (`RetrievalQA`)                                              |
+| **Vector store**   | Chroma                                                                 |
+| **Embeddings**     | `sentence-transformers/all-MiniLM-L6-v2`                               |
+| **LLM (default)**  | Qwen2.5-3B-Instruct via vLLM production-stack                          |
+| **LLM (fallback)** | Groq (`llama-3.1-8b-instant`)                                          |
+| **Cloud**          | Google Kubernetes Engine (GKE)                                         |
+| **IaC**            | Terraform (modular: network · gke · storage · artifact_registry)    |
+| **CI/CD**          | GitHub Actions + Workload Identity Federation                          |
+| **Security**       | tfsec · Checkov · gitleaks · OPA/conftest · 8-tool LLMSecOps suite |
+| **Observability**  | kube-prometheus-stack · Grafana · Pushgateway · GuideLLM · lm-eval |
 
 ---
 

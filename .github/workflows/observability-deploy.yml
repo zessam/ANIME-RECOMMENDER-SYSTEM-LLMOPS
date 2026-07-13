@@ -1,17 +1,11 @@
 name: Observability Deploy
 
-# Security-gated pipeline that deploys the monitoring stack (kube-prometheus-stack
-# + Pushgateway) to the GKE cluster.
+# Security-gated pipeline that deploys the FULL observability stack in one go:
+# kube-prometheus-stack + Pushgateway + the eval Jobs (guidellm, lm-eval).
 #   - push / PR under k8s/observability/**: validate + security scan only.
-#   - manual dispatch: validate + scan, then deploy/run-eval — WAITS FOR APPROVAL.
+#   - manual dispatch: validate + scan, then deploy everything — WAITS FOR APPROVAL.
 on:
   workflow_dispatch:
-    inputs:
-      action:
-        description: "What to do"
-        type: choice
-        options: [deploy, run-eval]
-        default: deploy
   push:
     paths:
       - "k8s/observability/**"
@@ -118,33 +112,27 @@ jobs:
       - name: Install Helm
         run: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-      - name: Deploy / run-eval
+      - name: Deploy monitoring stack
         run: |
-          ACTION="${{ github.event.inputs.action }}"
-          ACTION="${ACTION:-deploy}"   # push events have no input -> default to deploy
-          echo "Action: $ACTION"
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install "$PROM_RELEASE" prometheus-community/kube-prometheus-stack \
+            -n "$MONITORING_NS" --create-namespace \
+            -f "$PROM_VALUES" \
+            --wait --timeout 20m
+          kubectl apply -f k8s/observability/pushgateway.yaml
 
-          case "$ACTION" in
-            run-eval)
-              # Jobs are immutable once created, so delete any prior run then re-apply.
-              #kubectl delete -f k8s/observability/guidellm-job.yaml --ignore-not-found
-              #kubectl delete -f k8s/observability/lm-eval-job.yaml --ignore-not-found
-              kubectl apply -f k8s/observability/guidellm-job.yaml
-              kubectl apply -f k8s/observability/lm-eval-job.yaml
-              echo "--- jobs (they run async; watch with kubectl logs) ---"
-              kubectl get jobs -n default
-              ;;
+      - name: Run eval jobs (guidellm + lm-eval)
+        run: |
+          # Jobs are immutable once created — delete any prior run, then apply to re-run.
+          kubectl delete -f k8s/observability/guidellm-job.yaml --ignore-not-found
+          kubectl delete -f k8s/observability/lm-eval-job.yaml --ignore-not-found
+          kubectl apply -f k8s/observability/guidellm-job.yaml
+          kubectl apply -f k8s/observability/lm-eval-job.yaml
+          kubectl get jobs -n default
 
-            *)  # deploy
-              helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-              helm repo update
-              helm upgrade --install "$PROM_RELEASE" prometheus-community/kube-prometheus-stack \
-                -n "$MONITORING_NS" --create-namespace \
-                -f "$PROM_VALUES" \
-                --wait --timeout 20m
-              kubectl apply -f k8s/observability/pushgateway.yaml
-              kubectl get pods -n "$MONITORING_NS"
-              echo "Grafana:  kubectl port-forward svc/${PROM_RELEASE}-grafana 3000:80 -n ${MONITORING_NS}"
-              echo "Password: kubectl get secret ${PROM_RELEASE}-grafana -n ${MONITORING_NS} -o jsonpath='{.data.admin-password}' | base64 -d"
-              ;;
-          esac
+      - name: Show access
+        run: |
+          kubectl get pods -n "$MONITORING_NS"
+          echo "Grafana:  kubectl port-forward svc/${PROM_RELEASE}-grafana 3000:80 -n ${MONITORING_NS}"
+          echo "Password: kubectl get secret ${PROM_RELEASE}-grafana -n ${MONITORING_NS} -o jsonpath='{.data.admin-password}' | base64 -d"
