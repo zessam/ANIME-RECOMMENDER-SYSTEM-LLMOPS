@@ -1,0 +1,30 @@
+# Trivy ignore file — accepted (bypassed) vulnerabilities for the app image.
+#
+# WHY BYPASSED: every finding is fixable ONLY via a MAJOR dependency upgrade that
+# breaks the app — langchain 0.2.x -> 0.3/1.x (breaking API migration + the pinned
+# langchain-huggingface/langchain-openai), transformers 4 -> 5 (breaks
+# sentence-transformers 3.0.1), pillow 10 -> 12 (transitive, streamlit conflicts).
+# None are reachable in this app's usage: it does not deserialize untrusted data,
+# does not process user-supplied images, and does not set trust_remote_code.
+#
+# The gate stays FAIL-CLOSED for any *new* fixable HIGH/CRITICAL not listed here.
+# TODO: clear these during a dependency-modernization pass (upgrade LangChain stack).
+
+# --- langchain ecosystem (needs 0.2 -> 0.3/1.x migration) ---
+CVE-2026-45134
+CVE-2025-6984
+CVE-2025-68664
+CVE-2025-65106
+CVE-2026-34070
+CVE-2026-44843
+CVE-2025-6985
+GHSA-f4xh-w4cj-qxq8
+
+# --- pillow (transitive; needs 12.x) ---
+CVE-2026-25990
+CVE-2026-40192
+CVE-2026-42311
+
+# --- transformers (needs 5.x; breaks sentence-transformers 3.0.1) ---
+CVE-2026-4372
+CVE-2026-5241
