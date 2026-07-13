@@ -1,0 +1,75 @@
+name: LLMSecOps
+
+# One STAGE per tool — each is a separate job that calls the reusable
+# llmsecops-stage workflow. Manual only; each stage is gated by `production`.
+# Pick `all` (runs every stage) or a single tool.
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Which stage to run"
+        type: choice
+        default: all
+        options:
+          - all
+          - prompt-security # Promptfoo
+          - llm-vuln # Garak
+          - agent-security # Agentic Security
+          - prompt-fuzz # ps-fuzz 2
+          - io-rag-scan # LLM-Guard
+          - model-fingerprint # LLMmap
+          - privacy # LLM Confidentiality
+          - policy-compliance # Purple Llama
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  prompt-security: # Promptfoo — injection / jailbreak / leakage
+    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'prompt-security' }}
+    uses: ./.github/workflows/llmsecops-stage.yml
+    with: { stage: prompt-security }
+    secrets: inherit
+
+  llm-vuln: # Garak — broad red team
+    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'llm-vuln' }}
+    uses: ./.github/workflows/llmsecops-stage.yml
+    with: { stage: llm-vuln }
+    secrets: inherit
+
+  agent-security: # Agentic Security — tool abuse / multi-step
+    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'agent-security' }}
+    uses: ./.github/workflows/llmsecops-stage.yml
+    with: { stage: agent-security }
+    secrets: inherit
+
+  prompt-fuzz: # ps-fuzz 2 — system prompt fuzzing
+    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'prompt-fuzz' }}
+    uses: ./.github/workflows/llmsecops-stage.yml
+    with: { stage: prompt-fuzz }
+    secrets: inherit
+
+  io-rag-scan: # LLM-Guard — input/output + RAG scan
+    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'io-rag-scan' }}
+    uses: ./.github/workflows/llmsecops-stage.yml
+    with: { stage: io-rag-scan }
+    secrets: inherit
+
+  model-fingerprint: # LLMmap — model fingerprinting
+    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'model-fingerprint' }}
+    uses: ./.github/workflows/llmsecops-stage.yml
+    with: { stage: model-fingerprint }
+    secrets: inherit
+
+  privacy: # LLM Confidentiality — confidential info exposure
+    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'privacy' }}
+    uses: ./.github/workflows/llmsecops-stage.yml
+    with: { stage: privacy }
+    secrets: inherit
+
+  policy-compliance: # Purple Llama / Llama Guard — policy + moderation
+    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'policy-compliance' }}
+    uses: ./.github/workflows/llmsecops-stage.yml
+    with: { stage: policy-compliance }
+    secrets: inherit

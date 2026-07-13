@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anime-rec-app
+  namespace: default
+  labels:
+    app.kubernetes.io/name: anime-rec-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anime-rec-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anime-rec-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      # Chroma/SQLite needs a WRITABLE dir; the image bakes chroma_db into the
+      # read-only rootfs. Seed it into an emptyDir the app can write to.
+      initContainers:
+        - name: seed-chroma
+          image: us-central1-docker.pkg.dev/PROJECT_ID/anime-rec/anime-rec-app:latest
+          command: ["sh", "-c", "cp -a /app/chroma_db/. /seed/ && echo chroma seeded"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: chroma, mountPath: /seed}
+      containers:
+        - name: app
+          # Pushed by the app-deploy pipeline; pin to a digest for prod.
+          image: us-central1-docker.pkg.dev/PROJECT_ID/anime-rec/anime-rec-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8501
+          env:
+            - name: LLM_PROVIDER
+              value: "vllm"
+            # Points at the vLLM production-stack router (k8s/production-stack).
+            - name: VLLM_BASE_URL
+              value: "http://vllm-router-service.default.svc.cluster.local:80/v1"
+            - name: VLLM_MODEL_NAME
+              value: "Qwen/Qwen2.5-3B-Instruct"
+            # all-MiniLM-L6-v2 is baked into the image at /opt/hf (dockerfile) and
+            # loaded offline — must match the image's HF_HOME or the app can't find it.
+            - name: HF_HOME
+              value: "/opt/hf"
+          resources:
+            requests: {cpu: "250m", memory: "768Mi"}
+            limits: {cpu: "1", memory: "2Gi"} # torch + MiniLM + chroma + streamlit
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Streamlit's built-in health endpoint.
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          # readOnlyRootFilesystem => give Streamlit writable scratch space.
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: streamlit, mountPath: /home/app/.streamlit}
+            - {name: chroma, mountPath: /app/chroma_db} # writable, seeded by initContainer
+      volumes:
+        - {name: tmp, emptyDir: {}}
+        - {name: streamlit, emptyDir: {}}
+        - {name: chroma, emptyDir: {}}

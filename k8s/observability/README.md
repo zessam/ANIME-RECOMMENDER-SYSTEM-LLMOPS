@@ -35,9 +35,12 @@ DevSecOps way as the infra/vLLM pipelines:
   free tier (no alertmanager, 2-day retention, small resource requests) and hardened
   (non-root Grafana, no hardcoded password).
 - Push a change under `k8s/observability/**` → the gates run; **Run workflow → approve**
-  to deploy. `uninstall` action tears it down.
-- The **eval Jobs** (`guidellm-job.yaml`, `lm-eval-job.yaml`) are *measurements*, run
-  on demand with `kubectl apply` — not part of the continuous deploy.
+  to deploy.
+- The **`action`** dropdown on manual dispatch:
+  - **`deploy`** — install/upgrade the monitoring stack (Prometheus/Grafana + Pushgateway).
+  - **`run-eval`** — (re)run the `guidellm` + `lm-eval` Jobs (deletes any prior run first,
+    since Jobs are immutable). Run this **after** the monitoring stack + vLLM engine are up.
+  - **`uninstall`** — tear it all down (stack, pushgateway, jobs).
 
 > Security note: the eval Jobs `pip install` tools at runtime as a convenience, which
 > Checkov flags (unpinned image / root). For a hardened setup, bake `guidellm` and

@@ -1,0 +1,21 @@
+# Keep the build context small and free of host cruft / secrets.
+.git
+.github
+venv/
+logs/
+*.egg-info/
+ANIME_RECOMMENDER.egg-info/
+chroma_db/          # rebuilt inside the image; never ship the host copy
+.env
+.env.*
+.claude
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+# docs / planning — not needed in the image
+*.md
+k8s/
+k8s-local/
+terraform/
+security/

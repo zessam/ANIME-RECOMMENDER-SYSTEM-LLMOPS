@@ -2,15 +2,9 @@ name: vLLM Deploy
 
 # Deploys the vLLM production-stack (CPU) to the GKE cluster via Helm.
 #   - push / PR under k8s/production-stack/**: lint + render only (no cluster access).
-#   - manual dispatch: lint, then deploy/uninstall — WAITS FOR APPROVAL on `production`.
+#   - manual dispatch: lint, then deploy — WAITS FOR APPROVAL on `production`.
 on:
   workflow_dispatch:
-    inputs:
-      action:
-        description: "What to do"
-        type: choice
-        options: [deploy, uninstall]
-        default: deploy
   push:
     paths:
       - "k8s/production-stack/**"
@@ -102,21 +96,15 @@ jobs:
           helm repo add vllm "$CHART_REPO"
           helm repo update
 
-      - name: Deploy or uninstall
+      - name: Deploy
         run: |
-          if [ "${{ github.event.inputs.action }}" = "uninstall" ]; then
-            echo "Uninstalling release $RELEASE ..."
-            helm uninstall "$RELEASE" -n "$NAMESPACE"
-          else
-            echo "Deploying release $RELEASE (this scales the serve pool 0->1 and downloads the model — slow) ..."
-            helm upgrade --install "$RELEASE" "$CHART" \
-              -n "$NAMESPACE" --create-namespace \
-              -f "$VALUES" \
-              --wait --timeout 30m
-          fi
+          echo "Deploying release $RELEASE (this scales the serve pool 0->1 and downloads the model — slow) ..."
+          helm upgrade --install "$RELEASE" "$CHART" \
+            -n "$NAMESPACE" --create-namespace \
+            -f "$VALUES" \
+            --wait --timeout 30m
 
       - name: Show status
-        if: ${{ github.event.inputs.action != 'uninstall' }}
         run: |
           kubectl get pods -n "$NAMESPACE" -o wide
           echo "--- services ---"
