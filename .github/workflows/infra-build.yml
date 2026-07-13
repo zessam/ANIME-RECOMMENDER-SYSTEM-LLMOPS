@@ -104,8 +104,9 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     needs: security-scan
-    # No environment here on purpose: plan must run automatically on push.
-    # Auth secrets must therefore be REPOSITORY secrets (not environment secrets).
+    # The GCP auth secrets and TF_STATE_BUCKET live in the `production`
+    # environment, so this job must reference it to read them.
+    environment: production
     defaults:
       run:
         working-directory: terraform

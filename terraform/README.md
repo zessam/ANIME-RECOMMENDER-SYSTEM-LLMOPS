@@ -92,26 +92,35 @@ gcloud iam workload-identity-pools providers describe "$PROVIDER" \
 
 **Repo → Settings → Secrets and variables → Actions**
 
+All under the **`production` environment** (Settings → Environments → production):
+
 | Name | Kind | How to get it |
 |------|------|---------------|
-| `WORKLOAD_PROVIDER` | **repository** secret | output of step **3d** (`projects/<num>/locations/global/workloadIdentityPools/github-pool/providers/github-provider`) |
-| `SERVICE_ACCOUNT` | **repository** secret | the SA email, e.g. `terraform-ci@<project>.iam.gserviceaccount.com` |
-| `GCP_PROJECT_ID` | **repository** secret | your project ID (`gcloud config get-value project`) |
-| `TF_STATE_BUCKET` | **repository variable** | the state bucket from step 1, e.g. `<project>-tfstate` |
+| `WORKLOAD_PROVIDER` | environment secret | output of step **3d** (`projects/<num>/locations/global/workloadIdentityPools/github-pool/providers/github-provider`) |
+| `SERVICE_ACCOUNT` | environment secret | the SA email, e.g. `terraform-ci@<project>.iam.gserviceaccount.com` |
+| `GCP_PROJECT_ID` | environment secret | your project ID (`gcloud config get-value project`) |
+| `TF_STATE_BUCKET` | environment variable | the state bucket from step 1, e.g. `<project>-tfstate` |
 
-> These must be **repository** secrets (not *environment* secrets). The `plan`
-> and `policy` jobs run automatically on every push and need them **without** the
-> approval gate. Environment-scoped secrets would force those jobs to wait for
-> approval too.
+> Because these are **environment**-scoped, every job that authenticates
+> (`plan`, `apply`) references `environment: production`. `security-scan` and
+> `policy` need no secrets, so they carry no environment.
 
 > No `GCP_SA_KEY` — WIF is keyless, so there is no long-lived credential to leak.
 
-### 5. Create the approval gate
+### 5. Approval gate (optional)
 
-Repo → **Settings → Environments → New environment → `production`** → enable
-**Required reviewers** and add yourself. The `apply` job and the whole
-`Infra Destroy` workflow are pinned to this environment, so **both pause and wait
-for a human to click *Approve*** before they run. Plan/policy are not gated.
+Repo → **Settings → Environments → `production` → Required reviewers** (add
+yourself). Any job pinned to `production` then waits for a human to click
+**Approve**. **Note:** because the secrets live in `production`, this gates
+`plan` **and** `apply` (and `destroy`) — every push will pause at `plan` for
+approval. If you want `plan` to run freely but still gate `apply`/`destroy`, see
+the note below.
+
+> **Plan-auto + apply-approval:** to get that combo you must let `plan` reach the
+> secrets without the reviewer gate — either move the secrets to **repository**
+> scope, or create a second environment (e.g. `plan`, no reviewers) holding the
+> same secrets for the `plan` job while `production` (with reviewers) gates
+> apply/destroy.
 
 ---
 
