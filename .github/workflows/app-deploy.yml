@@ -185,7 +185,7 @@ jobs:
           category: trivy
 
       - name: Trivy gate (fail on fixable HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:ci
           format: table
@@ -276,7 +276,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy gate on the pushed image (fail-closed)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
           format: table
