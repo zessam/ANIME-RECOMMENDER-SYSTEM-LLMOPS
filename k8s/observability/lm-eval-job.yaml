@@ -20,7 +20,9 @@ spec:
           args:
             - |
               set -e
-              pip install --quiet "lm-eval[api]"
+              # transformers is required for the HF tokenizer backend that
+              # local-completions uses when talking to an OpenAI-compatible server.
+              pip install --quiet "lm-eval[api]" transformers
               ROUTER=http://vllm-router-service.default.svc.cluster.local:80/v1/completions
               lm_eval --model local-completions \
                 --model_args "base_url=${ROUTER},model=Qwen/Qwen2.5-3B-Instruct,num_concurrent=1,tokenized_requests=False" \

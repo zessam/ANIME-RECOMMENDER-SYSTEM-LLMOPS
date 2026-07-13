@@ -24,19 +24,22 @@ spec:
       # read-only rootfs. Seed it into an emptyDir the app can write to.
       initContainers:
         - name: seed-chroma
-          image: us-central1-docker.pkg.dev/PROJECT_ID/anime-rec/anime-rec-app:latest
+          image: us-central1-docker.pkg.dev/PROJECT_ID/anime-rec/anime-rec-app:PLACEHOLDER
           command: ["sh", "-c", "cp -a /app/chroma_db/. /seed/ && echo chroma seeded"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          resources:
+            requests: {cpu: "50m", memory: "64Mi"}
+            limits: {cpu: "250m", memory: "256Mi"}
           volumeMounts:
             - {name: chroma, mountPath: /seed}
       containers:
         - name: app
           # Pushed by the app-deploy pipeline; pin to a digest for prod.
-          image: us-central1-docker.pkg.dev/PROJECT_ID/anime-rec/anime-rec-app:latest
+          image: us-central1-docker.pkg.dev/PROJECT_ID/anime-rec/anime-rec-app:PLACEHOLDER
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8501

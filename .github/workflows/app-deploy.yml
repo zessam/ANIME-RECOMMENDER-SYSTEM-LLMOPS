@@ -50,6 +50,9 @@ env:
   AR_REPO: anime-rec # Artifact Registry repo (terraform: var.artifact_repo_name)
   IMAGE_NAME: anime-rec-app
   KUBECONFORM_VERSION: "0.6.7"
+  # equivalent to `trivy --skip-version-check` on every Trivy step (env is ignored
+  # by Trivy versions that don't support the flag, so it's always safe).
+  TRIVY_SKIP_VERSION_CHECK: "true"
 
 jobs:
   # ===========================================================================
@@ -71,7 +74,11 @@ jobs:
       - name: Pytest
         run: |
           # Exit code 5 == "no tests collected"; treat as pass until tests exist.
-          pytest -q; code=$?
+          # (disable -e so the non-zero exit doesn't abort before we inspect it)
+          set +e
+          pytest -q
+          code=$?
+          set -e
           if [ "$code" = "5" ]; then echo "No tests collected (yet)."; exit 0; fi
           exit $code
 
@@ -208,20 +215,24 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
-  # STAGE 3 — Kubernetes manifest policy (schema + security lint). push+PR.
+  # STAGE 3 — Kubernetes manifest gates (one scan per stage). push+PR.
   # ===========================================================================
-  manifest-policy:
-    name: Manifest schema + security policy
+  kubeconform:
+    name: Manifest schema (kubeconform)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
       - name: Schema-validate manifests (kubeconform)
         run: |
           curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
             | tar -xz -C /tmp kubeconform
           /tmp/kubeconform -strict -summary -ignore-missing-schemas k8s/app/ # HARD gate
 
+  kube-linter:
+    name: Manifest security (kube-linter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
       - name: Security-lint manifests (kube-linter)
         uses: stackrox/kube-linter-action@v1.0.7
         with:
@@ -296,7 +307,7 @@ jobs:
           IMAGE="${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${AR_REPO}/${IMAGE_NAME}@${{ steps.push.outputs.digest }}"
           echo "Deploying $IMAGE"
           # Pin the manifest placeholder to the exact digest we just built + scanned.
-          sed -i "s|image: us-central1-docker.pkg.dev/PROJECT_ID/${AR_REPO}/${IMAGE_NAME}:latest|image: ${IMAGE}|" k8s/app/deployment.yaml
+          sed -i "s|image: us-central1-docker.pkg.dev/PROJECT_ID/${AR_REPO}/${IMAGE_NAME}:PLACEHOLDER|image: ${IMAGE}|" k8s/app/deployment.yaml
           kubectl apply -f k8s/app/ -n "$NAMESPACE"
           kubectl rollout status deployment/anime-rec-app -n "$NAMESPACE" --timeout=5m
 
