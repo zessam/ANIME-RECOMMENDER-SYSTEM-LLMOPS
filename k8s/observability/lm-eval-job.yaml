@@ -1,0 +1,49 @@
+# lm-eval (lm-evaluation-harness) — QUALITY measurement. Runs a benchmark task
+# against the router's OpenAI API, then PUSHES the accuracy scores to the
+# Pushgateway so they appear in Prometheus -> Grafana.
+# Keep --limit small: CPU inference of a 3B model is slow.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lm-eval-gsm8k
+  namespace: default
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: lm-eval
+          image: python:3.11-slim
+          command: ["bash", "-lc"]
+          args:
+            - |
+              set -e
+              pip install --quiet "lm-eval[api]"
+              ROUTER=http://vllm-router-service.default.svc.cluster.local:80/v1/completions
+              lm_eval --model local-completions \
+                --model_args "base_url=${ROUTER},model=Qwen/Qwen2.5-3B-Instruct,num_concurrent=1,tokenized_requests=False" \
+                --tasks gsm8k \
+                --limit 20 \
+                --output_path /tmp/lmeval
+              # Parse results and push each score to the Pushgateway.
+              python - <<'PY'
+              import json, glob, urllib.request
+              f = sorted(glob.glob('/tmp/lmeval/**/results*.json', recursive=True))[-1]
+              results = json.load(open(f))['results']
+              lines = ["# TYPE lm_eval_score gauge"]
+              for task, metrics in results.items():
+                  for key, val in metrics.items():
+                      if isinstance(val, (int, float)) and 'stderr' not in key and ',' in key:
+                          metric = key.split(',')[0]
+                          lines.append(f'lm_eval_score{{task="{task}",metric="{metric}"}} {val}')
+              body = "\n".join(lines) + "\n"
+              url = "http://pushgateway.monitoring.svc.cluster.local:9091/metrics/job/lm_eval/model/qwen2_5_3b"
+              req = urllib.request.Request(url, data=body.encode(), method='POST')
+              print("pushgateway status:", urllib.request.urlopen(req).status)
+              print(body)
+              PY
+          resources:
+            requests: { cpu: "200m", memory: "512Mi" }
+            limits: { memory: "1Gi" }

@@ -1,0 +1,139 @@
+name: Observability Deploy
+
+# Security-gated pipeline that deploys the monitoring stack (kube-prometheus-stack
+# + Pushgateway) to the GKE cluster.
+#   - push / PR under k8s/observability/**: validate + security scan only.
+#   - manual dispatch: validate + scan, then deploy/uninstall — WAITS FOR APPROVAL.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do"
+        type: choice
+        options: [deploy, uninstall]
+        default: deploy
+  push:
+    paths:
+      - "k8s/observability/**"
+      - ".github/workflows/observability-deploy.yml"
+  pull_request:
+    paths:
+      - "k8s/observability/**"
+      - ".github/workflows/observability-deploy.yml"
+
+concurrency:
+  group: obs-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # Workload Identity Federation (keyless)
+  security-events: write # upload SARIF to the Security tab
+
+env:
+  CLUSTER_NAME: anime-rec-cluster
+  CLUSTER_LOCATION: us-central1-a
+  MONITORING_NS: monitoring
+  PROM_RELEASE: kube-prom-stack
+  PROM_VALUES: k8s/observability/kube-prom-stack-values.yaml
+  KUBECONFORM_VERSION: 0.6.7
+  GITLEAKS_VERSION: 8.18.4
+
+jobs:
+  # ===========================================================================
+  # STAGE 1 — parallel gates (no cluster access; run on every push/PR)
+  # ===========================================================================
+  validate:
+    name: Manifest schema (kubeconform)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: kubeconform
+        run: |
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp kubeconform
+          # -ignore-missing-schemas: ServiceMonitor is a CRD not in the core schema set
+          /tmp/kubeconform -summary -ignore-missing-schemas k8s/observability/pushgateway.yaml \
+            k8s/observability/guidellm-job.yaml k8s/observability/lm-eval-job.yaml
+
+  security-scan:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # gitleaks needs full history
+
+      - name: Checkov (Kubernetes)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: k8s/observability
+          framework: kubernetes
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          soft_fail: true # findings surfaced to Security tab, not hard-blocking
+
+      - name: Upload Checkov SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: checkov.sarif
+          category: checkov-observability
+
+      - name: gitleaks (secret scan)
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks detect --source . --redact --exit-code 1
+
+  # ===========================================================================
+  # STAGE 2 — deploy (manual dispatch; WAITS FOR APPROVAL on `production`)
+  # ===========================================================================
+  deploy:
+    name: Deploy monitoring stack
+    runs-on: ubuntu-latest
+    needs: [validate, security-scan]
+    if: github.event_name != 'pull_request'
+    environment: production # REQUIRED REVIEWERS => waits for approval
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v3
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.CLUSTER_LOCATION }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Install Helm
+        run: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Deploy or uninstall
+        run: |
+          if [ "${{ github.event.inputs.action }}" = "uninstall" ]; then
+            echo "Uninstalling monitoring stack ..."
+            helm uninstall "$PROM_RELEASE" -n "$MONITORING_NS" || true
+            kubectl delete -f k8s/observability/pushgateway.yaml --ignore-not-found
+          else
+            helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+            helm repo update
+            helm upgrade --install "$PROM_RELEASE" prometheus-community/kube-prometheus-stack \
+              -n "$MONITORING_NS" --create-namespace \
+              -f "$PROM_VALUES" \
+              --wait --timeout 20m
+            kubectl apply -f k8s/observability/pushgateway.yaml
+          fi
+
+      - name: Show status
+        if: ${{ github.event.inputs.action != 'uninstall' }}
+        run: |
+          kubectl get pods -n "$MONITORING_NS"
+          echo "Grafana:  kubectl port-forward svc/${PROM_RELEASE}-grafana 3000:80 -n ${MONITORING_NS}"
+          echo "Password: kubectl get secret ${PROM_RELEASE}-grafana -n ${MONITORING_NS} -o jsonpath='{.data.admin-password}' | base64 -d"

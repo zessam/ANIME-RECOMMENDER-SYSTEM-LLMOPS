@@ -1,0 +1,36 @@
+# GuideLLM — performance benchmark. It drives controlled LOAD at the router; the
+# results show up as live serving metrics (throughput / TTFT / latency) that
+# Prometheus already scrapes — so watch the Grafana serving dashboard while this runs.
+# Runs as a client on the app pool (no serve-pool toleration).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: guidellm-benchmark
+  namespace: default
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: guidellm
+          image: python:3.11-slim
+          command: ["bash", "-lc"]
+          args:
+            - |
+              set -e
+              pip install --quiet guidellm
+              # --target is the OpenAI base URL of the ROUTER (single entry point)
+              guidellm benchmark \
+                --target http://vllm-router-service.default.svc.cluster.local:80 \
+                --model Qwen/Qwen2.5-3B-Instruct \
+                --rate-type sweep \
+                --max-seconds 120 \
+                --data "prompt_tokens=128,output_tokens=128" \
+                --output-path /tmp/guidellm.json
+              echo "=== GuideLLM finished. Its report is above; the load it generated"
+              echo "=== is visible on the Grafana vLLM serving dashboard (throughput/TTFT/latency)."
+          resources:
+            requests: { cpu: "200m", memory: "512Mi" }
+            limits: { memory: "1Gi" }

@@ -1,0 +1,39 @@
+# kube-prometheus-stack values — trimmed for the free tier and hardened.
+# Applied by the Observability Deploy pipeline.
+
+# Alertmanager not needed for a demo — removes a StatefulSet + its CPU/mem.
+alertmanager:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 2d # short retention keeps the PVC/memory small
+    # Scrape ServiceMonitors in ALL namespaces (vLLM lives in `default`).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: "200m", memory: "512Mi" }
+      limits: { memory: "1Gi" }
+
+grafana:
+  # Do NOT hardcode a password here (gitleaks/checkov would flag it). The chart
+  # generates one into the `kube-prom-stack-grafana` secret; read it with:
+  #   kubectl get secret kube-prom-stack-grafana -n monitoring -o jsonpath="{.data.admin-password}" | base64 -d
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits: { memory: "256Mi" }
+  # Harden Grafana pod.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 472
+    fsGroup: 472
+    seccompProfile: { type: RuntimeDefault }
+
+prometheusOperator:
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits: { memory: "256Mi" }
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: "50m", memory: "64Mi" }
+    limits: { memory: "128Mi" }

@@ -1,0 +1,64 @@
+# Prometheus Pushgateway — a sink for BATCH metrics (lm-eval / guidellm summaries).
+# Batch jobs finish and disappear, so they can't be scraped directly; they PUSH
+# their final numbers here, and Prometheus scrapes the Pushgateway.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pushgateway
+  namespace: monitoring
+  labels: { app: pushgateway }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: pushgateway }
+  template:
+    metadata:
+      labels: { app: pushgateway }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534 # nobody
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: pushgateway
+          image: prom/pushgateway:v1.9.0
+          ports:
+            - name: http
+              containerPort: 9091
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # pushgateway keeps metrics in memory
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pushgateway
+  namespace: monitoring
+  labels: { app: pushgateway }
+spec:
+  selector: { app: pushgateway }
+  ports:
+    - name: http
+      port: 9091
+      targetPort: 9091
+---
+# Tell kube-prometheus-stack's Prometheus to scrape the Pushgateway.
+# NOTE: the `release` label must match your kube-prometheus-stack Helm release name.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pushgateway
+  namespace: monitoring
+  labels:
+    release: kube-prom-stack
+spec:
+  selector:
+    matchLabels: { app: pushgateway }
+  endpoints:
+    - port: http
+      interval: 15s
+      honorLabels: true # keep the job/instance labels the pushers set
