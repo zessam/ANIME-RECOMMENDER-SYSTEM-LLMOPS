@@ -1,0 +1,1 @@
+gcloud container clusters get-credentials anime-rec-cluster --zone us-central1-a  --project trisec-lab

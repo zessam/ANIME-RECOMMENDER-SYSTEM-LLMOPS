@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: anime-rec-groq-service
+  namespace: default
+  labels:
+    app.kubernetes.io/name: anime-rec-app-groq
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: anime-rec-app-groq
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8501

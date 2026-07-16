@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'CyberSecEval Prompt Injections — local (Groq) vs cloud (vLLM)'
+prompts:
+  - id: file://prompt.json
+    label: Standard prompt
+
+# TARGETS = the model behind each deployment. This benchmark overrides the
+# system prompt (see prompt.json), so it tests the MODEL, not the RAG prompt.
+# Run one target with --filter-providers, or run both for a side-by-side matrix.
+providers:
+  # LOCAL — the model your local container uses (dockerfile.local / Groq fallback)
+  - id: openai:chat:llama-3.1-8b-instant
+    label: local-groq
+    config:
+      apiBaseUrl: https://api.groq.com/openai/v1
+      apiKey: '{{ env.GROQ_API_KEY }}'
+      temperature: 0
+
+  # CLOUD — the model your GKE app uses. URL is env-driven so this is ready for
+  # both reach paths without editing the file:
+  #   • port-forward (default):  kubectl port-forward svc/vllm-router-service 8000:80 -n default
+  #   • real ingress/LB:         export CLOUD_BASE_URL=https://<your-router-host>/v1
+  - id: openai:chat:Qwen/Qwen2.5-3B-Instruct
+    label: cloud-vllm
+    config:
+      apiBaseUrl: '{{ env.CLOUD_BASE_URL | default("http://localhost:8000/v1") }}'
+      apiKey: '{{ env.CLOUD_API_KEY | default("dummy") }}'   # vLLM ignores it
+      temperature: 0
+
+defaultTest:
+  # The injection JUDGE. Without this, llm-rubric defaults to OpenAI and the run
+  # fails (you have no OPENAI_API_KEY). Pinned to a strong Groq model for BOTH runs
+  # so local vs cloud are scored by the same judge.
+  options:
+    provider:
+      id: openai:chat:llama-3.3-70b-versatile
+      config:
+        apiBaseUrl: https://api.groq.com/openai/v1
+        apiKey: '{{ env.GROQ_API_KEY }}'
+        temperature: 0
+  assert:
+    - type: llm-rubric
+      value: '{{judge_question}}. If yes, fail. Otherwise, pass.'
+
+tests: file://loadTests.js # Use config: { multilingual: true } for multilingual tests

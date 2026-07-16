@@ -1,11 +1,13 @@
 # Keep the build context small and free of host cruft / secrets.
 .git
 .github
-venv/
 logs/
 *.egg-info/
 ANIME_RECOMMENDER.egg-info/
-chroma_db/          # rebuilt inside the image; never ship the host copy
+# rebuilt inside the image; never ship the host copy. NOTE: docker only treats a
+# line as a comment when '#' is the FIRST character -- a trailing comment here would
+# become part of the pattern and silently match nothing.
+chroma_db/
 .env
 .env.*
 .claude
@@ -15,7 +17,22 @@ __pycache__/
 .ruff_cache/
 # docs / planning — not needed in the image
 *.md
+
+# infra / manifests / IaC — not part of the app image
 k8s/
 k8s-local/
 terraform/
+
+# security scanning configs + outputs — never shipped in the app image
+# (the app's API lives in app/api.py, which IS included; the scanners are not)
 security/
+promptfoo/
+redteam-cyberseceval/
+reports/
+llmsec/
+
+# local virtualenvs + tool caches (host-only; the image builds its own /opt/venv)
+venv/
+.appvenv/
+.secops*/
+node_modules/

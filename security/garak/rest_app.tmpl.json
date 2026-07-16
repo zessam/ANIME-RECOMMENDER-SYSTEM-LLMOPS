@@ -1,0 +1,13 @@
+{
+  "rest": {
+    "RestGenerator": {
+      "name": "anime-recommender-app",
+      "uri": "__APP_URL__",
+      "method": "post",
+      "headers": { "Content-Type": "application/json" },
+      "req_template_json_object": { "prompt": "$INPUT" },
+      "response_json": true,
+      "response_json_field": "output"
+    }
+  }
+}

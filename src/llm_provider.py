@@ -1,6 +1,14 @@
 from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
-from config.config import LLM_PROVIDER, VLLM_BASE_URL, VLLM_MODEL_NAME, GROQ_API_KEY, MODEL_NAME
+from config.config import (
+    LLM_PROVIDER,
+    VLLM_BASE_URL,
+    VLLM_MODEL_NAME,
+    VLLM_TIMEOUT,
+    VLLM_MAX_RETRIES,
+    GROQ_API_KEY,
+    MODEL_NAME,
+)
 
 def get_llm():
     if LLM_PROVIDER == "groq":
@@ -12,4 +20,6 @@ def get_llm():
         model=VLLM_MODEL_NAME,
         temperature=0,
         max_tokens=512,
+        timeout=VLLM_TIMEOUT,
+        max_retries=VLLM_MAX_RETRIES,
     )

@@ -1,6 +1,8 @@
-name: App Deploy
+name: App Deploy (vLLM)
 
-# Secure CI/CD for the Anime Recommender Streamlit app.
+# Secure CI/CD for the Anime Recommender Streamlit app (self-hosted vLLM image).
+# The Groq-backed variant (dockerfile.local + k8s/app-groq/) has NO pipeline yet and
+# is deployed by hand; this workflow builds and deploys the vLLM image only.
 #   push / PR (app sources, dockerfile, k8s/app/**): source gates -> build+scan -> manifest policy.
 #   push to main / manual dispatch: same gates, then build+push+sign+deploy to GKE.
 # The deploy job WAITS FOR APPROVAL on the `production` environment and never runs from a PR.
@@ -342,11 +344,60 @@ jobs:
       - name: Deploy to GKE (by digest)
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${AR_REPO}/${IMAGE_NAME}@${{ steps.push.outputs.digest }}"
+          PLACEHOLDER="image: ${REGION}-docker.pkg.dev/PROJECT_ID/${AR_REPO}/${IMAGE_NAME}:PLACEHOLDER"
           echo "Deploying $IMAGE"
+          # Fail loudly if the manifest ever drifts from this literal: an unmatched sed
+          # is silent, and we'd apply :PLACEHOLDER and only learn 5m later via
+          # ImagePullBackOff. Both the initContainer and the app container match.
+          if ! grep -qF "$PLACEHOLDER" k8s/app/deployment.yaml; then
+            echo "::error::placeholder not found in k8s/app/deployment.yaml: ${PLACEHOLDER}"
+            exit 1
+          fi
           # Pin the manifest placeholder to the exact digest we just built + scanned.
-          sed -i "s|image: us-central1-docker.pkg.dev/PROJECT_ID/${AR_REPO}/${IMAGE_NAME}:PLACEHOLDER|image: ${IMAGE}|" k8s/app/deployment.yaml
+          sed -i "s|${PLACEHOLDER}|image: ${IMAGE}|" k8s/app/deployment.yaml
+          if grep -q "PLACEHOLDER" k8s/app/deployment.yaml; then
+            echo "::error::an unreplaced PLACEHOLDER remains in k8s/app/deployment.yaml"
+            grep -n "PLACEHOLDER" k8s/app/deployment.yaml
+            exit 1
+          fi
           kubectl apply -f k8s/app/ -n "$NAMESPACE"
           kubectl rollout status deployment/anime-rec-app -n "$NAMESPACE" --timeout=5m
+
+      # The pod is Ready as soon as Streamlit's /_stcore/health answers, which says
+      # nothing about vLLM. Resolve the router from INSIDE the pod, using the pod's own
+      # VLLM_BASE_URL, so a wrong service name / port can't ship green.
+      # Advisory: the serve pool scales to zero and vLLM deploys on its own schedule,
+      # so an unreachable router must not fail an otherwise-good app rollout.
+      - name: Smoke-test the vLLM router from the app pod (advisory)
+        run: |
+          POD=$(kubectl get pod -n "$NAMESPACE" -l app.kubernetes.io/name=anime-rec-app \
+                  -o jsonpath='{.items[0].metadata.name}')
+          echo "Probing \$VLLM_BASE_URL/models from ${POD} ..."
+          # urllib is stdlib -- no curl in the hardened runtime image. Every line of the
+          # probe is indented to this block's level; YAML strips that indent back off, so
+          # python still receives its top-level statements at column 0.
+          if kubectl exec -n "$NAMESPACE" "$POD" -- python -c '
+          import json, os, sys, urllib.request
+          url = os.environ["VLLM_BASE_URL"].rstrip("/") + "/models"
+          want = os.environ["VLLM_MODEL_NAME"]
+          try:
+              with urllib.request.urlopen(url, timeout=30) as r:
+                  served = [m["id"] for m in json.load(r).get("data", [])]
+          except Exception as e:
+              print(f"unreachable: {url} -> {e!r}")
+              sys.exit(1)
+          print(f"router is serving: {served}")
+          if want not in served:
+              print(f"MODEL MISMATCH: app requests {want!r}, router serves {served}")
+              sys.exit(2)
+          print(f"OK: {want} is served")
+          '; then
+            echo "vLLM router reachable and serving the expected model."
+          else
+            echo "::warning::app is deployed but the vLLM router did not answer as expected \
+          (serve pool scaled to zero, vLLM not deployed, or a URL/model mismatch). \
+          Check: kubectl get pods -n ${NAMESPACE} -l environment=router"
+          fi
 
       - name: Show status
         run: |

@@ -3,3 +3,7 @@ logs/
 ANIME_RECOMMENDER.egg-info/
 .env
 .claude
+llmsec/
+reports/
+*.log
+security/llmmap/LLMmap/

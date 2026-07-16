@@ -1,75 +1,177 @@
 name: LLMSecOps
 
-# One STAGE per tool — each is a separate job that calls the reusable
-# llmsecops-stage workflow. Manual only; each stage is gated by `production`.
-# Pick `all` (runs every stage) or a single tool.
+# One pipeline. Scans the app running on GKE — whatever image is deployed.
+# The app Deployment serves Streamlit (no HTTP API to inject into), so we stand
+# up a short-lived /recommend endpoint FROM THE SAME live image, scan it with
+# promptfoo (CyberSecEval, model layer) + garak (app layer), then tear it down.
 on:
   workflow_dispatch:
     inputs:
-      stage:
-        description: "Which stage to run"
-        type: choice
-        default: all
-        options:
-          - all
-          - prompt-security # Promptfoo
-          - llm-vuln # Garak
-          - agent-security # Agentic Security
-          - prompt-fuzz # ps-fuzz 2
-          - io-rag-scan # LLM-Guard
-          - model-fingerprint # LLMmap
-          - privacy # LLM Confidentiality
-          - policy-compliance # Purple Llama
+      promptfoo_sample:
+        description: "promptfoo: CyberSecEval cases (blank = all 251)"
+        default: "25"
+      garak_probes:
+        description: "garak: probe families (comma-separated)"
+        default: "promptinject"
 
 permissions:
   contents: read
-  id-token: write
+  id-token: write        # WIF auth to GKE
+
+env:
+  CLUSTER_NAME: anime-rec-cluster
+  CLUSTER_LOCATION: us-central1-a
+  NS: default
+  ROUTER_SVC: vllm-router-service
+  APP_DEPLOY: anime-rec-app
+  SCAN_POD: llmsec-scan-target
+  APP_PORT: "8600"
 
 jobs:
-  prompt-security: # Promptfoo — injection / jailbreak / leakage
-    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'prompt-security' }}
-    uses: ./.github/workflows/llmsecops-stage.yml
-    with: { stage: prompt-security }
-    secrets: inherit
+  scan:
+    runs-on: ubuntu-latest
+    environment: production          # GROQ_API_KEY + WIF secrets
+    steps:
+      - uses: actions/checkout@v5
 
-  llm-vuln: # Garak — broad red team
-    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'llm-vuln' }}
-    uses: ./.github/workflows/llmsecops-stage.yml
-    with: { stage: llm-vuln }
-    secrets: inherit
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
 
-  agent-security: # Agentic Security — tool abuse / multi-step
-    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'agent-security' }}
-    uses: ./.github/workflows/llmsecops-stage.yml
-    with: { stage: agent-security }
-    secrets: inherit
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v3
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.CLUSTER_LOCATION }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-  prompt-fuzz: # ps-fuzz 2 — system prompt fuzzing
-    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'prompt-fuzz' }}
-    uses: ./.github/workflows/llmsecops-stage.yml
-    with: { stage: prompt-fuzz }
-    secrets: inherit
+      - name: Install kubectl
+        run: |
+          curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install /tmp/kubectl /usr/local/bin/kubectl
 
-  io-rag-scan: # LLM-Guard — input/output + RAG scan
-    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'io-rag-scan' }}
-    uses: ./.github/workflows/llmsecops-stage.yml
-    with: { stage: io-rag-scan }
-    secrets: inherit
+      # ---- stand up a /recommend endpoint from whatever image the app runs ----
+      - name: Deploy ephemeral scan target
+        run: |
+          IMG=$(kubectl get deploy "$APP_DEPLOY" -n "$NS" \
+                -o jsonpath='{.spec.template.spec.containers[0].image}')
+          echo "scanning the live app image: $IMG"
 
-  model-fingerprint: # LLMmap — model fingerprinting
-    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'model-fingerprint' }}
-    uses: ./.github/workflows/llmsecops-stage.yml
-    with: { stage: model-fingerprint }
-    secrets: inherit
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: ${SCAN_POD}
+            namespace: ${NS}
+            labels: { app: ${SCAN_POD} }
+          spec:
+            restartPolicy: Never
+            securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+            containers:
+              - name: app
+                image: ${IMG}
+                # the app's own FastAPI endpoint (baked into the image) — no wrapper/ConfigMap
+                command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "${APP_PORT}"]
+                env:
+                  # match the real app's config: it talks to the in-cluster vLLM router
+                  - { name: LLM_PROVIDER, value: "vllm" }
+                  - { name: VLLM_BASE_URL, value: "http://${ROUTER_SVC}.${NS}.svc.cluster.local:80/v1" }
+                  - { name: VLLM_MODEL_NAME, value: "Qwen/Qwen2.5-3B-Instruct" }
+                  - { name: HF_HOME, value: "/opt/hf" }
+                ports: [ { containerPort: ${APP_PORT} } ]
+                # ephemeral scanner pod: allow writes (Chroma/SQLite need the baked chroma_db writable)
+                securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } }
+          EOF
 
-  privacy: # LLM Confidentiality — confidential info exposure
-    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'privacy' }}
-    uses: ./.github/workflows/llmsecops-stage.yml
-    with: { stage: privacy }
-    secrets: inherit
+          kubectl wait --for=condition=Ready "pod/${SCAN_POD}" -n "$NS" --timeout=240s \
+            || { kubectl describe pod/${SCAN_POD} -n "$NS"; kubectl logs pod/${SCAN_POD} -n "$NS"; exit 1; }
 
-  policy-compliance: # Purple Llama / Llama Guard — policy + moderation
-    if: ${{ github.event.inputs.stage == 'all' || github.event.inputs.stage == 'policy-compliance' }}
-    uses: ./.github/workflows/llmsecops-stage.yml
-    with: { stage: policy-compliance }
-    secrets: inherit
+      - name: Port-forward endpoints
+        run: |
+          # the app /recommend endpoint (garak target)
+          kubectl port-forward "pod/${SCAN_POD}" ${APP_PORT}:${APP_PORT} -n "$NS" > /tmp/pf-app.log 2>&1 &
+          # the vLLM router (promptfoo cloud-vllm target)
+          kubectl port-forward "svc/${ROUTER_SVC}" 8000:80 -n "$NS" > /tmp/pf-router.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf -X POST "http://localhost:${APP_PORT}/recommend" \
+              -H 'Content-Type: application/json' -d '{"prompt":"ping"}' >/dev/null && break || sleep 3
+          done
+          curl -sf http://localhost:8000/v1/models >/dev/null || echo "router not ready (promptfoo may fail)"
+
+      # ---- promptfoo — CyberSecEval vs the model behind the app (router) ----
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Promptfoo CyberSecEval (model layer)
+        working-directory: security/promptfoo/cyberseceval
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}      # judge
+          PROMPTFOO_DISABLE_TELEMETRY: "1"
+        run: |
+          mkdir -p reports
+          SAMPLE=""
+          if [ -n "${{ inputs.promptfoo_sample }}" ]; then SAMPLE="--filter-sample ${{ inputs.promptfoo_sample }}"; fi
+          npx --yes promptfoo@latest eval \
+            --filter-providers cloud-vllm \
+            $SAMPLE \
+            -o reports/promptfoo.html \
+            -o reports/promptfoo.json
+
+      # ---- garak — vs the deployed app (/recommend) ----
+      - name: Garak (app layer)
+        env:
+          PROBES: ${{ inputs.garak_probes }}
+          APP_URL: http://localhost:8600/recommend
+        run: |
+          python3 -m venv /tmp/garakvenv
+          /tmp/garakvenv/bin/pip install -q -U pip garak
+          source /tmp/garakvenv/bin/activate
+          security/garak/run.sh app
+
+      # ---- report ----
+      - name: Job summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, glob, os
+          out = []
+          for f in glob.glob("security/promptfoo/cyberseceval/reports/promptfoo.json"):
+              try: d = json.load(open(f))
+              except Exception: continue
+              st = (d.get("results") or {}).get("stats") or d.get("stats") or {}
+              s, fa = st.get("successes", 0), st.get("failures", 0); tot = s + fa
+              out += ["## Promptfoo — CyberSecEval (model)", "",
+                      "| resisted | injected | total | resist rate |", "|---|---|---|---|",
+                      f"| {s} | {fa} | {tot} | {(s/tot*100 if tot else 0):.1f}% |", ""]
+          for f in glob.glob("security/garak/reports/garak-app*.report.jsonl"):
+              total = passed = 0
+              for ln in open(f):
+                  try: e = json.loads(ln)
+                  except Exception: continue
+                  if e.get("entry_type") == "eval":
+                      total += e.get("total", 0); passed += e.get("passed", 0)
+              if total:
+                  out += ["## Garak — app (RAG /recommend)", "",
+                          "| resisted | total | resist rate |", "|---|---|---|",
+                          f"| {passed} | {total} | {passed/total*100:.1f}% |", ""]
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary and out: open(summary, "a").write("\n".join(out) + "\n")
+          print("\n".join(out) or "no reports parsed")
+          PY
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llmsecops-reports
+          path: |
+            security/promptfoo/cyberseceval/reports/
+            security/garak/reports/
+          if-no-files-found: ignore
+
+      - name: Tear down scan target
+        if: always()
+        run: kubectl delete pod "${SCAN_POD}" -n "$NS" --ignore-not-found
